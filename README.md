@@ -425,11 +425,11 @@ router.get('/logout', isLoggedIn, (req, res)=>{
     req.logOut();
     req.session.destroy();
     res.redirect('/');
-});
+}); // 로그아웃 라우터
 
 module.exports = router;
 ```
-+ 회원가입 라우터
++ **회원가입 라우터**
 기존에 같은 이메이로 가입한 사용자가 있는지 조회한 뒤, 있다면 회원가입 페이지로 되돌려보냅니다. 단 주소뒤에 에러를 쿼리스트링으로 표시
 같은 이메일로 가입한 사용자가 없다면 비밀번호를 암호화하고, 사용자 정보를 생성
 회원가입 시 비밀번호는 암호화해서 저장해야한다. 
@@ -438,13 +438,73 @@ bcrypt 모듈의 hash메서드를 사용하면 손쉽게 비밀번호를 암호�
 bcrypto 두번쨰 인수는 pdkdf2의 반복 횟수와 비슷한 기능을 한다.
 숫자가 커질수록 비밀번호를 알아내기 어려워지지만 암호화 시간도 오래 걸린다.
 12 이상을 추천하며, 31까지 사용할 수 있다. 프로미스를 지원하는 함수이므로 await를 사용
-+ 로그인 라우터
++ **로그인 라우터**
 로그인 요청이 들어오면 passport.authenticate('local') 미들웨어가 로컬 로그인 전략을 수행한다.
 **미들웨어인데 라우터 미들웨어 안에 들어있다.** 미들웨어에 사용자 정의 기능을 추가하고 싶을 때 이렇게 할 수 있다. 이럴 때는 내부 미들웨어에 (req, res, next)를 인수로 제공해서 호출하면 된다.
 전략 코드는 잠시 후에 작성. 전략이 성공하거나 실패하면 authenticate 메서드의 콜백 함수가 실행 된다. 콜백 함수의 첫번쨰 매개변수(authErr) 값이 있다면 실패한 것이다.
+두번째 매개변수 값이 있다면 성공한 것이고, req.login 메서드를 호출합니다.
+Passport는 req 객체에 login과 logout 메서드를 추가한다. req.login은 passport.serializeUser를 호출한다.
+req.login에 제공하는 user 객체가 serializeUser로 넘어가게 된다.
++ **로그아웃 라우터**
+req.logout 메서드는 req.user 객체를 제거하고, req.session.destroy는 req.session 객체의 내용을 제거합니다.
+세션 정보를 지운 후 메인 페이지로 되돌아가빈다. 로그인 해제되어 있을 것입니다.
+23. passport-local 모듈에서 Strategy 생성자를 불러와 로그인 전략 구현 **(node.js 교과서 P427 참고)**
+```javascript
+<<passport/localStrategy.js>>
 
+const passport = require('passport');
+const LocalStrategy = require('passport-local').Strategy;
+const bcrypt = require('bcrypt');
 
+const User = require('../models/user');
 
+module.exports = () => {
+    passport.use(new LocalStrategy({
+        usernameField: 'email',
+        passwordField: 'password'
+    }, async (email, password, done) => {
+        try {
+            const exUser = await User.findOne({ where: { email } });
+            if (exUser) {
+                const result = await bcrypt.compare(password, exUser.password);
+                if (result) {
+                    // 1. 로그인 성공 시
+                    done(null, exUser);
+                    /**
+                     *                             done( null,   exUser)
+                     *                                    ↓        ↓
+                     * passport.authenticate('local', (authError, user, info))
+                     */ 
+                } else {
+                    // 2. 로그인 실패 시
+                    done(null, false, { message: '비밀번호가 일치하지 않습니다.' });
+                     /**
+                     *                                  null      false  { message: '비밀번호가 일치하지 않습니다.' }
+                     *                                    ↓        ↓       ↓
+                     * passport.authenticate('local', (authError, user, info))
+                     */ 
+                }
+            } else {
+                done(null, false, { message: '가입되지 않은 회원입니다.' })
+            }
+        } catch (error) {
+            // 3. 서버 에러시
+            console.error(error);
+            done(error);
+            /**
+             *                                  error
+             *                                    ↓        
+             * passport.authenticate('local', (authError, user, info))
+             */ 
+        }
+    }));
+}
+```
++ LocalStrategy 생성자의 첫번째 인수로 주어진 객체는 전략에 관한 설정하는 곳이다.
+usernameField와 passwordField에는 일치하는 로그인 라우터의 req.body 속성명을 적으면 된다.
+req.body.email에 이메일 주소가, req.body.password에 비밀번호가 담겨 들어오므로 email과 password를 각각 넣는다.
++ 실제 전략을 수행하는 async 함수이다. LocalStrategy 생성자와 두 번째 인수로 들어간다.
+첫번째 인수에서 넣어준 email과 password는 각각 async 함수의 첫번쨰와 두번째 매개변수가 된다. 세번째 매개변수인 done함수는 passport,authenticate의 콜백 함수 이다.
 
 ## 예제 샘플
 예제 : https://github.com/ZeroCho/nodejs-book.git
