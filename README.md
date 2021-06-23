@@ -448,6 +448,8 @@ req.login에 제공하는 user 객체가 serializeUser로 넘어가게 된다.
 + **로그아웃 라우터**
 req.logout 메서드는 req.user 객체를 제거하고, req.session.destroy는 req.session 객체의 내용을 제거합니다.
 세션 정보를 지운 후 메인 페이지로 되돌아가빈다. 로그인 해제되어 있을 것입니다.
+**<node.js 교과서 P425 내용>**
+
 23. passport-local 모듈에서 Strategy 생성자를 불러와 로그인 전략 구현 **(node.js 교과서 P427 참고)**
 ```javascript
 <<passport/localStrategy.js>>
@@ -505,6 +507,110 @@ usernameField와 passwordField에는 일치하는 로그인 라우터의 req.bod
 req.body.email에 이메일 주소가, req.body.password에 비밀번호가 담겨 들어오므로 email과 password를 각각 넣는다.
 + 실제 전략을 수행하는 async 함수이다. LocalStrategy 생성자와 두 번째 인수로 들어간다.
 첫번째 인수에서 넣어준 email과 password는 각각 async 함수의 첫번쨰와 두번째 매개변수가 된다. 세번째 매개변수인 done함수는 passport,authenticate의 콜백 함수 이다.
++ done이 호출 된 후에는 다시 passport.authenticate의 콜백 함수에서 나머지 로직이 실행됩니다. 로그인이 성공했다면 메인 페이지로 리다렉트되면서 로그인 폼 대신 회원 정보가 뜰 것이다.
+아직 auth 라우터를 연결하지 않았으므로 코드가 동작하지 않는다.
+**<node.js 교과서 P427 내용>**
+
+<br/>
+
+#### 9.3.2 카카오 로그인 구현하기 **(Nodejs 교과서 P428)**<hr/>
++ 카카오 로그인이란 로그인 인증 과정을 카카오에 맡기는 것을 뜻한다.
++ 사용자는 번거롭게 새로운 사이트에 회원가입하지 않아도 되므로 좋고, 서비스 제공자는 로그인 과정르 검증된 SNS에 안심하고 맡길 수 있어 좋다.
++ SNS 로그인의 특징은 회원가입 절차가 따로 없다는 것이다. 처음 로그인 할 때는 회원가입 처리를 해야 하고, 두 번째 로그인부터는 로그인 처리를 해야한다. 따라서 SNS 로그인 전략은 로컬 로그인 전략보다 다소 복잡하다.
+
+24. passport-kakao 모듈로부터 Strategy 생성자를 불러와 전략을 구현 **(node.js 교과서 P429 참고)**
+```javascript
+<<passport/kakaoStrategy.js>>
+
+const passport = require('passport');
+const kakaoStrategy = require('passport-kakao').Strategy;
+
+const User = require('../models/user');
+
+module.exports = () => {
+    passsport.use(new kakaoStrategy({
+        clientID: process.env.KAKAO_ID,
+        callbackURL: '/auth/kakao/callback'
+    }, async (accessToken, refreshToken, profile, done) => {
+        console.log('kakao profile', profile);
+        try {
+            const exUser = await User.findOne({
+                where: { snsId: profile.id, provider: 'kakao' }
+            });
+            if (exUser) {
+                done(null, exUser);
+            } else {
+                const newUser = await User.create({
+                    email: profile._json && profile._json.kakao_account_email,
+                    nick: profile.displayName,
+                    snsId: profile.id,
+                    provider: 'kakao',
+                });
+                done(null, newUser);
+            }
+        } catch (error) {
+            console.error(error);
+            done(error);
+        }
+    }));
+};
+```
++ 로컬 로그인과 마찬가지로 첫번쨰 인자는 카카오 로그인에 대한 설정이다. clientID는 카카오에서 발급해주는 아이디이다. 
+노출되지 않아야 하므로 process.env.KAKAO_ID로 설정했다.
+나중에 아이디를 발급받아 .env 파일에 넣을 것이다.
+callbackURL은 카카오로부터 인증 결과를 받을 라우터 주소이다. 
+아래에서 라우터를 작성할 때 이 주소를 사용한다.
++ 먼저 기존에 카카오를 통해 회원가입한 사용자가 있는지 조회한다.
+있다면 이미 회원가입되어 있는 경우이므로 사용자 정보와 함께 done 함수를 호출하고 전략을 종료한다.
++ 카카오를 통해 회원가입한 사용자가 없다면 회원가입을 진행한다.
+카카오에서는 인증 후 callbackURL에 적힌 주소로 accessToken, refreshToken과 profile을 보낸다.
+profile에는 사용자 정보들이 들어있다. 카카오에서 보내주는 것이므로 데이터는 console.log 메서드로 확인해 보는 것이 좋다.
+pofile 객체에서 원하는 정보를 꺼내와 회원가입을 하면 된다. 사용자를 생성한 뒤 done함수를 호출한다.
+**<node.js 교과서 P429 내용>**
+
+25. 카카오 로그인 라우터
+```javascript
+<<routes/auth.js>>
+
+...
+// 카카오 로그인 라우터
+router.get('/kakao', passport.authenticate('kakao')); //GET 라우터에 접근하면 카카오 로그인 과정이 시작
+                                                      // layout.html의 카카오톡 버튼에 /auth/kakao 링크가 붙어 있다.
+
+router.get('/kakao/callback', passport.authenticate('kakao', {
+    failureRedirect: '/',
+}), (req, res) => {
+    res.redirect('/');
+});
+
+module.exports = router;
+```
++ GET /auth/kakao로 접근하면 카카오 로그인 과정이 시작 된다. layout.html의 카카오톡 버튼에 /auth/kakao 링크가 붙어 있다.
++ GET /auth/kakao에서 로그인 전략을 수행하는데, 처음에는 카카오 로그인 창으로 리다이렉트한다.
++ 그 창에서 로그인 후 성공 여부 결과를  GET /auth/kakao/callback 으로 받는다.
++ 이 라우터에서는 카카오 로그인 전략을 다시 수행한다.
++ 로컬 로그인과 다른 점은 passport.authenticate 메서드에 콜백 함수를 제공하지 않는다는 점이다.
++ 카카오 로그인은 로그인 성공 시 내부적으로 req.login을 호출하므로 우리가 직접 호출할 필요가 없다.
++ 콜백 함수 대신 로그인에 실패했을 때 어디로 이동할지를 failureRedirect 속성에 적고, 성공 시에도 어디로 이동할지를 다음 미들웨어에 적는다.
+**<node.js 교과서 P430 내용>**
+
+26. 추가한 auth 라우터를 app.js에 연결
+```javascript
+<<app.js>>
+
+...
+const pageRouter = require('./routes/page');
+const authRouter = require('./routes/auth');
+const { sequelize } = require('./models');
+...
+app.use('/', pageRouter)
+app.use('/auth', authRouter)
+...
+```
+
+27. kakaoStrategy.js에서 사용하는 clientId를 발급
+- 카카오 로그인을 위해서 카카오 개발자 계정과 카카오 로그인용 애플리케이셔 등록 필요
+- https://developers.kakao.com 에 접속하여 카카오 회원가입 또는 로그인
 
 ## 예제 샘플
 예제 : https://github.com/ZeroCho/nodejs-book.git
